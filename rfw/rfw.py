@@ -83,11 +83,11 @@ def create_requesthandlers(rfwconf, cmd_queue, expiry_queue):
     def process(handler, modify, urlpath):
         # modify should be 'D' for Delete or 'I' for Insert understood as -D and -I iptables flags
         assert modify in ['D', 'I', 'L']
+        log.debug("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ")
         log.debug('process {} urlpath: {}'.format(modify, urlpath))
-      
         try:
-            action, rule, directives = cmdparse.parse_command(urlpath)
-            log.debug('\nAction: {}\nRule: {}\nDirectives: {}'.format(action, rule, directives))
+            action, rule, directives, params = cmdparse.parse_command(urlpath)
+            log.debug('\nAction: {}\nRule: {}\nDirectives: {}\nParams: {}'.format(action, rule, directives, params))
             if modify == 'L':
                 if action == 'help':
                     resp = 'TODO usage'
@@ -241,12 +241,12 @@ def rfw_init_rules(rfwconf):
     ###
     log.info('Delete existing init rules')
     # find 'drop all packets to and from rfw port'
-    drop_input = ipt.find({'target': ['DROP'], 'chain': ['INPUT'], 'prot': ['tcp'], 'extra': ['tcp dpt:' + rfw_port]})
+    drop_input = ipt.find({'target': ['DROP'], 'chain': ['INPUT'], 'prot': ['tcp'], 'extra': ['tcp dport:' + rfw_port]})
     log.info(drop_input)
     log.info('Existing drop input to rfw port {} rules:\n{}'.format(rfw_port, '\n'.join(map(str, drop_input))))
     for r in drop_input:
         Iptables.exe_rule('D', r)
-    drop_output = ipt.find({'target': ['DROP'], 'chain': ['OUTPUT'], 'prot': ['tcp'], 'extra': ['tcp spt:' + rfw_port]})
+    drop_output = ipt.find({'target': ['DROP'], 'chain': ['OUTPUT'], 'prot': ['tcp'], 'extra': ['tcp sport:' + rfw_port]})
     log.info('Existing drop output to rfw port {} rules:\n{}'.format(rfw_port, '\n'.join(map(str, drop_output))))
     for r in drop_output:
         Iptables.exe_rule('D', r)

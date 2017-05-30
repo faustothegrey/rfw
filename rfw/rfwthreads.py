@@ -34,7 +34,7 @@ import time, logging
 import iputil, iptables
 from iptables import Iptables
 
-log = logging.getLogger('rfw.rfwthreads')
+log = logging.getLogger('rfw')
 
 
 class CommandProcessor(Thread):
@@ -61,29 +61,29 @@ class CommandProcessor(Thread):
 
 
     def run(self):
-        ruleset = set(Iptables.read_simple_rules())
+        #ruleset = set(Iptables.read_simple_rules())
         while True:
             modify, rule, directives = self.cmd_queue.get()
             try:
-                rule_exists = rule in ruleset
-                log.debug('{} rule_exists: {}'.format(rule, rule_exists))
+                #rule_exists = rule in ruleset
+                #log.debug('{} rule_exists: {}'.format(str(rule), rule_exists))
  
                 # check for duplicates, apply rule
                 if modify == 'I':
-                    if rule_exists:
-                        log.warn("Trying to insert existing rule: {}. Command ignored.".format(rule))
-                    else:
+                    # if rule_exists:
+                    #     log.warn("Trying to insert existing rule: {}. Command ignored.".format(rule))
+                    # else:
                         Iptables.exe_rule(modify, rule)
                         # schedule expiry timeout if present. Only for Insert rules and only if the rule didn't exist before (so it was added now)
                         self.schedule_expiry(rule, directives)
-                        ruleset.add(rule)
+#                        ruleset.add(rule)
                 elif modify == 'D':
-                    if rule_exists:
+ #                   if rule_exists:
                         #TODO delete rules in the loop to delete actual iptables duplicates. It's to satisfy idempotency and plays well with common sense
                         Iptables.exe_rule(modify, rule)
-                        ruleset.discard(rule)
-                    else:
-                        log.warn("Trying to delete not existing rule: {}. Command ignored.".format(rule))
+  #                      ruleset.discard(rule)
+#                    else:
+#                        log.warn("Trying to delete not existing rule: {}. Command ignored.".format(rule))
                 elif modify == 'L':
                     #TODO rereading the iptables?
                     pass

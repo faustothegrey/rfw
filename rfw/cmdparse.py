@@ -47,7 +47,6 @@ def convert_iface(iface):
         return iface
 
 
-
 class PathError(Exception):
     def __init__(self, path, msg=''):
         Exception.__init__(self, 'Incorrect path: {}. {}'.format(path, msg))
@@ -59,7 +58,7 @@ class PathError(Exception):
 # '/list/input' -> ('list', 'input')
 # '/drop/input/eth0/1.2.3.4' -> ('drop', Rule(...))
 
-def parse_command_path(path):
+def parse_command_path(path, params=None):
     # split url path into parts, lowercase, trim trailing slash, return tuple
     def path_parts(path):
         path = path.strip().lower()
@@ -78,13 +77,13 @@ def parse_command_path(path):
         return 'help', None
 
     action = p[0]
-   
+
     if action.upper() in iptables.RULE_TARGETS:
         try:
-            return action, build_rule(p)
+            return action, build_rule(p, params)
         except ValueError, e:
             raise PathError(path, e.message)
-    
+
     if action == 'list':
         if len(p) == 1:
             return action, None
@@ -96,12 +95,12 @@ def parse_command_path(path):
                 raise PathError(path, 'Wrong chain name for list command')
         else:
             raise PathError(path, 'Too many details for the list command')
-        
+
     raise PathError(path)
 
 
 # From the path parts tuple build and return Rule for drop/accept/reject type of command
-def build_rule(p):
+def build_rule(p, params):
     # There must be at least 4 parts like in /drop/input/eth0/1.2.3.4
     if len(p) < 4:
         raise ValueError('Not enough details to construct the rule')
@@ -119,7 +118,6 @@ def build_rule(p):
     if not ip1:
         raise ValueError('Incorrect IP address')
 
-    
     mask1 = None
     iface2 = None
     ip2 = None
@@ -152,7 +150,6 @@ def build_rule(p):
                     else:
                         raise ValueError('Incorrect netmask value')
 
-
     if chain in ['INPUT', 'OUTPUT']:
         if len(p) > 5:
             raise ValueError('Too many details for the {} chain'.format(chain))
@@ -167,6 +164,7 @@ def build_rule(p):
         if len(p) > 6 and not mask1 and not mask2:
             raise ValueError('Incorrect netmask value')
 
+    prot = 'all'
     if chain == 'INPUT':
         inp = iface1
         out = '*'
@@ -196,42 +194,66 @@ def build_rule(p):
             destination = ip2
         if mask2:
             destination = '{}/{}'.format(destination, mask2)
+    elif chain == 'PREROUTING':
+        inp = iface1
+        if iface2:
+            out = iface2
+        else:
+            out = '*'
+        source = ip1
+        print('mask1: '.format(mask1))
+        if mask1:
+            source = '{}/{}'.format(ip1, mask1)
+        destination = '0.0.0.0/0'
+        if ip2:
+            destination = ip2
+        if mask2:
+            destination = '{}/{}'.format(destination, mask2)
+        if 'p' in params:
+            prot = params['p']
+            del params['p']
+
     else:
         assert 'Should not happen'
 
-    return Rule({'target': target, 'chain': chain, 'inp': inp, 'out': out, 'source': source, 'destination': destination})
-
+    return Rule({'target': target, 'chain': chain, 'inp': inp, 'out': out, 'source': source, 'destination': destination,
+                 'prot': prot, 'extra': params})
 
 
 def parse_command_query(query):
     params = dict(urlparse.parse_qsl(query))
-    ret = {}
-    
+    directives = {}
+
     expire = params.get('expire')
     if expire:
         interval = timeutil.parse_interval(expire)
         if interval is None:
             raise ValueError('Incorrect expire parameter value')
-        ret['expire'] = str(interval)
+        directives['expire'] = str(interval)
 
     wait = params.get('wait')
     if wait:
         wait = wait.lower()
         if wait == 'true':
-            ret['wait'] = wait
+            directives['wait'] = wait
         else:
             raise ValueError('Incorrect wait parameter value')
-
 
     modify = params.get('modify')
     if modify:
         modify = modify.lower()
         if modify in ['insert', 'delete']:
-            ret['modify'] = modify
+            directives['modify'] = modify
         else:
             raise ValueError('Incorrect modify parameter value')
-    return ret
 
+    parsed_params = dict(qc.split("=") for qc in query.split("&"))
+
+    for exclude in ('expire', 'wait', 'modify'):
+        if exclude in params:
+            del params[exclude]
+
+    return directives, parsed_params
 
 
 def parse_command(url):
@@ -246,9 +268,7 @@ def parse_command(url):
     parsed = urlparse.urlparse(url)
     path, query = parsed.path, parsed.query
 
-    action, rule = parse_command_path(path)
-    directives = parse_command_query(query)
+    directives, params = parse_command_query(query)
+    action, rule = parse_command_path(path, params)
 
-    return (action, rule, directives) 
-
-
+    return (action, rule, directives, params)

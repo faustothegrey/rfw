@@ -35,21 +35,22 @@ from threading import RLock
 # Follow the logging convention:
 # - Modules intended as reusable libraries have names 'lib.<modulename>' what allows to configure single parent 'lib' logger for all libraries in the consuming application
 # - Add NullHandler (since Python 2.7) to prevent error message if no other handlers present. The consuming app may add other handlers to 'lib' logger or its children.
-log = logging.getLogger('lib.{}'.format(__name__))
+log = logging.getLogger('rfw')
 log.addHandler(logging.NullHandler())
 
 # note that the 'in' attribute from iptables output was renamed to 'inp' to avoid python keyword clash
-IPTABLES_HEADERS =         ['num', 'pkts', 'bytes', 'target', 'prot', 'opt', 'in', 'out', 'source', 'destination'] 
-RULE_ATTRS =      ['chain', 'num', 'pkts', 'bytes', 'target', 'prot', 'opt', 'inp', 'out', 'source', 'destination', 'extra']
-RULE_TARGETS =      ['DROP', 'ACCEPT', 'REJECT']
-RULE_CHAINS =       ['INPUT', 'OUTPUT', 'FORWARD']
-
+IPTABLES_HEADERS = ['num', 'pkts', 'bytes', 'target', 'prot', 'opt', 'in', 'out', 'source', 'destination']
+RULE_ATTRS = ['chain', 'num', 'pkts', 'bytes', 'target', 'prot', 'opt', 'inp', 'out', 'source', 'destination', 'extra']
+RULE_TARGETS = ['DROP', 'ACCEPT', 'REJECT', 'DNAT']
+RULE_CHAINS = ['INPUT', 'OUTPUT', 'FORWARD', 'PREROUTING']
 
 RuleProto = namedtuple('Rule', RULE_ATTRS)
+
 
 class Rule(RuleProto):
     """Lightweight immutable value object to store iptables rule
     """
+
     def __new__(_cls, *args, **kwargs):
         """Construct Rule tuple from a list or a dictionary
         """
@@ -60,7 +61,9 @@ class Rule(RuleProto):
             if isinstance(props, list):
                 return RuleProto.__new__(_cls, *props)
             elif isinstance(props, dict):
-                d = {'chain': None, 'num': None, 'pkts': None, 'bytes': None, 'target': None, 'prot': 'all', 'opt': '--', 'inp': '*', 'out': '*', 'source': '0.0.0.0/0', 'destination': '0.0.0.0/0', 'extra': ''}
+                d = {'chain': None, 'num': None, 'pkts': None, 'bytes': None, 'target': None, 'prot': 'all',
+                     'opt': '--', 'inp': '*', 'out': '*', 'source': '0.0.0.0/0', 'destination': '0.0.0.0/0',
+                     'extra': ''}
                 d.update(props)
                 return RuleProto.__new__(_cls, **d)
             else:
@@ -75,7 +78,7 @@ class Rule(RuleProto):
         """
         if isinstance(other, self.__class__):
             return self.chain == other.chain and self.target == other.target and self.prot == other.prot and self.opt == other.opt \
-                and self.inp == other.inp and self.out == other.out and self.source == other.source and self.destination == other.destination
+                   and self.inp == other.inp and self.out == other.out and self.source == other.source and self.destination == other.destination
         else:
             return False
 
@@ -83,11 +86,7 @@ class Rule(RuleProto):
         return not self.__eq__(other)
 
 
-
-
 class Iptables:
-
-
     # global lock for system iptables access
     lock = RLock()
     # store ipt_path as class variable, it's a system wide singleton anyway
@@ -113,9 +112,10 @@ class Iptables:
         """
         try:
             Iptables.exe(['-h'])
-            #subprocess.check_output([Iptables.ipt_path, '-h'], stderr=subprocess.STDOUT)
+            # subprocess.check_output([Iptables.ipt_path, '-h'], stderr=subprocess.STDOUT)
         except OSError, e:
-            raise Exception("Could not find {}. Check if it is correctly installed and if the path is correct.".format(Iptables.ipt_path))
+            raise Exception("Could not find {}. Check if it is correctly installed and if the path is correct.".format(
+                Iptables.ipt_path))
 
     @staticmethod
     def verify_permission():
@@ -123,13 +123,13 @@ class Iptables:
         """
         try:
             Iptables.exe(['-n', '-L', 'OUTPUT'])
-            #subprocess.check_output([Iptables.ipt_path, '-n', '-L', 'OUTPUT'], stderr=subprocess.STDOUT)
+            # subprocess.check_output([Iptables.ipt_path, '-n', '-L', 'OUTPUT'], stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError, e:
             raise Exception("No sufficient permission to run {}. You must be root.".format(Iptables.ipt_path))
 
     @staticmethod
     def verify_original():
-        #TODO check if iptables is pointing to original iptables program (and not to rfwc)
+        # TODO check if iptables is pointing to original iptables program (and not to rfwc)
         pass
 
     @staticmethod
@@ -139,13 +139,13 @@ class Iptables:
         """
         rules = []
         out = Iptables.exe(['-n', '-L', '-v', '-x', '--line-numbers'])
-        #out = subprocess.check_output([Iptables.ipt_path, '-n', '-L', '-v', '-x', '--line-numbers'], stderr=subprocess.STDOUT)
+        # out = subprocess.check_output([Iptables.ipt_path, '-n', '-L', '-v', '-x', '--line-numbers'], stderr=subprocess.STDOUT)
         chain = None
         header = None
         for line in out.split('\n'):
             line = line.strip()
             if not line:
-                chain = None  #on blank line reset current chain
+                chain = None  # on blank line reset current chain
                 continue
             m = re.match(r"Chain (\w+) .*", line)
             if m and m.group(1) in RULE_CHAINS:
@@ -153,7 +153,7 @@ class Iptables:
                 continue
             if "source" in line and "destination" in line:
                 # check if iptables output headers make sense 
-                assert line.split()  == IPTABLES_HEADERS
+                assert line.split() == IPTABLES_HEADERS
                 continue
             if chain:
                 columns = line.split()
@@ -166,37 +166,44 @@ class Iptables:
                     rule = Rule(columns)
                     rules.append(rule)
         return rules
-    
-   
+
+    @staticmethod
+    def key_to_option(key):
+        SINGLE_DASH_OPTIONS = ('p',)
+        if key in SINGLE_DASH_OPTIONS:
+            return '-{}'.format(key)
+        else:
+            return '--{}'.format(key)
+
     @staticmethod
     def rule_to_command(r):
         """Convert Rule object r to the list representing iptables command arguments like: 
         ['INPUT', '-p', 'tcp', '-d', '0.0.0.0/0', '-s', '1.2.3.4', '-j', 'ACCEPT']
         It is assumed that the rule is from trusted source (from Iptables.find())
         """
-        #TODO handle extras e.g. 'extra': 'tcp dpt:7373 spt:34543'
-        #TODO add validations
-        #TODO handle wildcards
-        assert r.chain == 'INPUT' or r.chain == 'OUTPUT' or r.chain == 'FORWARD'
+        # TODO handle extras e.g. 'extra': 'tcp dpt:7373 spt:34543'
+        # TODO add validations
+        # TODO handle wildcards
+        log.debug("Converting rule to command ({})".format(r.__dict__))
+        assert r.chain == 'INPUT' or r.chain == 'OUTPUT' or r.chain == 'FORWARD' or r.chain == 'PREROUTING'
         lcmd = []
         lcmd.append(r.chain)
+
+        if r.chain == "PREROUTING":
+            lcmd.append('-t')
+            lcmd.append('nat')
+
         if r.prot != 'all':
             lcmd.append('-p')
             lcmd.append(r.prot)
 
         # TODO enhance. For now handle only source and destination port
         if r.extra:
-            es = r.extra.split()
-            for e in es:
-                if e[:4] == 'dpt:':
-                    dport = e.split(':')[1]
-                    lcmd.append('--dport')
-                    lcmd.append(dport)
-                if e[:4] == 'spt:':
-                    sport = e.split(':')[1]
-                    lcmd.append('--sport')
-                    lcmd.append(sport)
-
+            for key, value in r.extra.items():
+                log.debug("extra param: key {}  value {}".format(key, value))
+                if Iptables.is_pre_target_option(key):
+                    lcmd.append(Iptables.key_to_option(key))
+                    lcmd.append(value)
         if r.destination != '0.0.0.0/0':
             lcmd.append('-d')
             lcmd.append(r.destination)
@@ -205,15 +212,20 @@ class Iptables:
             lcmd.append(r.source)
         lcmd.append('-j')
         lcmd.append(r.target)
-        return lcmd
+        if r.extra:
+            for key, value in r.extra.items():
+                if not Iptables.is_pre_target_option(key):
+                    lcmd.append(Iptables.key_to_option(key))
+                    lcmd.append(value)
 
+        return lcmd
 
     @staticmethod
     def exe_rule(modify, rule):
         assert modify == 'I' or modify == 'D'
         lcmd = Iptables.rule_to_command(rule)
-        return Iptables.exe(['-' + modify] + lcmd)
 
+        return Iptables.exe(['-' + modify] + lcmd)
 
     @staticmethod
     def exe(lcmd):
@@ -222,11 +234,12 @@ class Iptables:
             log.debug('Iptables.exe(): {}'.format(' '.join(cmd)))
             with Iptables.lock:
                 out = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-            if out: 
+            if out:
                 log.debug("Iptables.exe() output: {}".format(out))
             return out
         except subprocess.CalledProcessError, e:
-            log.error("Error code {} returned when called '{}'. Command output: '{}'".format(e.returncode, e.cmd, e.output))
+            log.error(
+                "Error code {} returned when called '{}'. Command output: '{}'".format(e.returncode, e.cmd, e.output))
             raise e
 
     @staticmethod
@@ -236,10 +249,14 @@ class Iptables:
         ipt = Iptables.load()
         # rfw originated rules may have only DROP/ACCEPT/REJECT targets and do not specify protocol and do not have extra args like ports
         if chain == 'INPUT' or chain is None:
-            input_rules = ipt.find({'target': RULE_TARGETS, 'chain': ['INPUT'], 'destination': ['0.0.0.0/0'], 'out': ['*'], 'prot': ['all'], 'extra': ['']})
+            input_rules = ipt.find(
+                {'target': RULE_TARGETS, 'chain': ['INPUT'], 'destination': ['0.0.0.0/0'], 'out': ['*'],
+                 'prot': ['all'], 'extra': ['']})
             rules.extend(input_rules)
         if chain == 'OUTPUT' or chain is None:
-            output_rules = ipt.find({'target': RULE_TARGETS, 'chain': ['OUTPUT'], 'source': ['0.0.0.0/0'], 'inp': ['*'], 'prot': ['all'], 'extra': ['']})
+            output_rules = ipt.find(
+                {'target': RULE_TARGETS, 'chain': ['OUTPUT'], 'source': ['0.0.0.0/0'], 'inp': ['*'], 'prot': ['all'],
+                 'extra': ['']})
             rules.extend(output_rules)
         if chain == 'FORWARD' or chain is None:
             forward_rules = ipt.find({'target': RULE_TARGETS, 'chain': ['FORWARD'], 'prot': ['all'], 'extra': ['']})
@@ -256,7 +273,7 @@ class Iptables:
         """
         ret = []
         for r in self.rules:
-            matched_all = True    # be optimistic, if inner loop does not break, it means we matched all clauses
+            matched_all = True  # be optimistic, if inner loop does not break, it means we matched all clauses
             for param, vals in query.items():
                 rule_val = getattr(r, param)
                 if rule_val not in vals:
@@ -266,4 +283,8 @@ class Iptables:
                 ret.append(r)
         return ret
 
-
+    @classmethod
+    def is_pre_target_option(cls, key):
+        if key in ('p', 'dport', 'sport'):
+            return True
+        return False
