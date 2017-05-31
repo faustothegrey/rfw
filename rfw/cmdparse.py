@@ -32,7 +32,7 @@ import sys, logging, urlparse, re
 import iputil, timeutil, iptables
 from iptables import Rule
 
-log = logging.getLogger("rfw.cmdparse")
+log = logging.getLogger('rfw')
 
 
 def convert_iface(iface):

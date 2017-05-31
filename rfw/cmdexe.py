@@ -30,7 +30,7 @@
 
 import subprocess, logging, re
 
-log = logging.getLogger("rfw.log")
+log = logging.getLogger('rfw')
 
 def call(lcmd):
     try:

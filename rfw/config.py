@@ -35,7 +35,7 @@ from ConfigParser import RawConfigParser, NoOptionError
 # Follow the logging convention:
 # - Modules intended as reusable libraries have names 'lib.<modulename>' what allows to configure single parent 'lib' logger for all libraries in the consuming application
 # - Add NullHandler (since Python 2.7) to prevent error message if no other handlers present. The consuming app may add other handlers to 'lib' logger or its children.
-log = logging.getLogger('lib.{}'.format(__name__))
+log = logging.getLogger('rfw')
 log.addHandler(logging.NullHandler())
 
 class ConfigError(Exception):

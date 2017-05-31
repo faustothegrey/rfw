@@ -32,7 +32,7 @@ import logging, sys, types, os.path, re
 import config, iputil, timeutil
 from ConfigParser import NoOptionError
 
-log = logging.getLogger('rfw.rfwconfig')
+log = logging.getLogger('rfw')
 
 class RfwConfig(config.Config):
 
